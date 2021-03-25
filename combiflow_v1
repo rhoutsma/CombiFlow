@@ -2,12 +2,14 @@
 ## relapse-inducing cell populations during disease progression and remission in the context of hematological malignancies.
 ## Note: This is the first version of the Combiflow pipeline, it will be updated to automate certain processes that are currently performed manually. 
 ## A detailed protocol for data preparation and processing throughout the pipeline will follow. 
+## The script below is adapted for analysis of matched de novo (DN) and relapse (R) samples plus a healthy control. This can be changed to fit specific data types by altering the
+## condition levels.
 
 
-#clean working directory and R history
+## Clean working directory and R history
 rm(list=ls())
 
-#load packages
+## Load packages
 library(tidyverse)
 library(ggplot2) 
 library(dplyr)
@@ -54,14 +56,13 @@ library(ConsensusClusterPlus)
 library("FactoMineR")
 
 
-
-
+## Set working directory
 setwd("F:\\Combiflow\\test_DNR")
 
 ### Data import
 
+## Import metadata file, which should specify which fcs files are included in the analysis, their samplename, condition, and a optional patient id.
 metadata_filename <- "test_DNR_metadata.xlsx"
-
 md <- read_excel(metadata_filename)
 
 ## Make sure condition variables are factors with the right levels
@@ -72,49 +73,45 @@ head(md)
 color_conditions <- c("#6A3D9A", "#FF7F00", "#008000", "purple", "black", "orange")
 names(color_conditions) <- levels(md$condition)
 
+## Load fcs data in a zipped format
 fcs_filename <- "test - tSNE DNR.zip"
-
 unzip(fcs_filename)
 
-
-
+## Read fcs data and create flowSet.
+## Note: If the parameters in all incldued fiels do not match, fcs_raw will give an error. This can be solved by adding/removing the parameters in question
 fcs_raw <- read.flowSet(md$file_name, transformation = FALSE, 
                         truncate_max_range = FALSE)
 fcs_raw
 
-
+## Load panel information
 panel_filename <- "test_DNR_panel.xlsx"
 panel <- read_excel(panel_filename)
 head(data.frame(panel))
 
+## Change names of fcs_raw file to match the names in the panel information file
 fcs_raw
 colnames(fcs_raw) = panel$Antigen[match(colnames(fcs_raw), panel$fcs_colname)]
 fcs_raw
 
-# Replace problematic characters 
+## Replace problematic characters 
 panel$Antigen <- gsub("-", "_", panel$Antigen)
 panel$fcs_colname <- gsub("-", "_", panel$fcs_colname)
-
-
 panel_fcs <- pData(parameters(fcs_raw[[1]]))
 head(panel_fcs)
 
-
-# Replace problematic characters 
+## Replace problematic characters 
 panel_fcs$name <- gsub("-", "_", panel_fcs$name)
 
-
-# Lineage markers
+## Lineage markers check, should match with the markers specified as lineage in the panel information file
 (lineage_markers <- panel$Antigen[panel$Lineage == 1])
 
-# Functional markers
+## Functional markers check
 (functional_markers <- panel$Antigen[panel$Functional == 1])
 
-# Unused markers
+## Unused markers check
 (unused_markers <- panel$Antigen[panel$Unused == 1])
 
-
-# Spot checks
+## Spot checks, should all return TRUE. If one returns FALSE there is a difference between the parameters in the flow data and the panel information
 all(lineage_markers %in% panel_fcs$name)
 
 all(functional_markers %in% panel_fcs$name)
@@ -124,7 +121,7 @@ all(unused_markers %in% panel_fcs$name)
 
 ### Data Transformation
 
-## arcsinh transformation and column subsetting
+## Arcsinh transformation and column subsetting
 fcs <- fsApply(fcs_raw, function(x, cofactor = 250){
   colnames(x) <- panel$Antigen
   expr <- exprs(x)
@@ -134,8 +131,7 @@ fcs <- fsApply(fcs_raw, function(x, cofactor = 250){
 })
 fcs
 
-
-## Extract expression
+## Extract expression from fcs file
 expr <- fsApply(fcs, exprs)
 dim(expr)
 
@@ -145,15 +141,12 @@ expr01 <- t((t(expr) - rng[, 1]) / (rng[, 2] - rng[, 1]))
 expr01[expr01 < 0] <- 0
 expr01[expr01 > 1] <- 1
 
-
-
 ### Diagnostic plots
 
 ## Generate sample IDs corresponding to each cell in the `expr` matrix
 sample_ids <- rep(md$sample_id, fsApply(fcs_raw, nrow))
 
-
-# Plot histograms aml vs nbm lineage markers
+## Plot histograms depicting expression per condition 
 ggdf <- data.frame(sample_id = sample_ids, expr [, lineage_markers])
 ggdf <- melt(ggdf, id.var = "sample_id", 
              value.name = "expression", variable.name = "antigen")
@@ -176,12 +169,14 @@ histograms<- ggplot(ggdf, aes(x = expression, color = condition, group = sample_
 histograms + scale_x_flowjo_biexp(maxValue = 262144, widthBasis = -500, pos = 4.5, neg = 0, equal.space = FALSE)
 
 
-# Get the median expression per sample
+## Get the median expression per sample
 expr_median_sample_tbl <- data.frame(sample_id = sample_ids, expr) %>%
   group_by(sample_id) %>% 
   summarize_all(list(median))
 
 ###  Cell population identification with FlowSOM and ConsensusClusterPlus
+
+## Cluster cells by the FlowSOM algorithm, the number of clusters (nmc) can be set. Default is 40. Clustering is based on lineage markers.
 fsom <- ReadInput(fcs, transform = FALSE, scale = FALSE)
 set.seed(1234)
 som <- BuildSOM(fsom, colsToUse = lineage_markers)
@@ -200,6 +195,7 @@ mc <- ConsensusClusterPlus(t(codes), maxK = nmc, reps = 100,
 code_clustering1 <- mc[[nmc]]$consensusClass
 cell_clustering1 <- code_clustering1[som$map$mapping[,1]]
 
+## Set color for each cluster
 color_clusters <- c("#DC050C", "#FB8072", "#1965B0", "#7BAFDE", "#882E72", "olivedrab",
                     "#B17BA6", "#FF7F00", "#FDB462", "#E7298A", "#E78AC3", "purple1",
                     "#33A02C", "#B2DF8A", "#55A1B1", "#8DD3C7", "#A6761D", "pink4", "thistle3", 
@@ -208,10 +204,7 @@ color_clusters <- c("#DC050C", "#FB8072", "#1965B0", "#7BAFDE", "#882E72", "oliv
                     "#aeae5c", "#1e90ff", "#00bfff", "#56ff0d", "#ffff00", "turquoise1", "peru")
 
 
-
-### Plot heatmap for lineage markers clusters
-
-
+## Plot heatmap for lineage markers clusters
 plot_clustering_heatmap_wrapper <- function(expr, expr01, 
                                             cell_clustering, color_clusters, cluster_merging = NULL){
   
@@ -273,7 +266,7 @@ heatmap_clusters<- plot_clustering_heatmap_wrapper(expr = expr[, lineage_markers
                                 cell_clustering = cell_clustering1, color_clusters = color_clusters)
 
 
-## Plot tSNE with lineage markers as input
+### Plot tSNE with lineage markers as input
 
 ## Find and skip duplicates
 dups <- which(!duplicated(expr[, lineage_markers]))
@@ -281,7 +274,7 @@ dups <- which(!duplicated(expr[, lineage_markers]))
 ## Data subsampling: create indices by sample
 inds <- split(1:length(sample_ids), sample_ids)
 
-## How many cells to downsample per-sample
+## How many cells to downsample per-sample. Default is 5000, ideally as high as possible but dependent on processing power. 
 tsne_ncells <- pmin(table(sample_ids), 5000)  
 
 ## Get subsampled indices
@@ -295,7 +288,7 @@ tsne_inds <- unlist(tsne_inds)
 
 tsne_expr <- expr[tsne_inds, lineage_markers]
 
-## Run t-SNE
+## Run t-SNE, the tsne_out step will take some time, longer if more files or a higher cell number is used.
 set.seed(1234)
 tsne_out <- Rtsne(tsne_expr, check_duplicates = FALSE, pca = FALSE)
 
@@ -322,8 +315,10 @@ tsne_clusters<- ggplot(dr,  aes(x = tSNE1, y = tSNE2, color = cell_clustering1))
 tsne_clusters
 
 ### Manual clustering
-cluster_merging1_filename <- "test_DNR_clusters.xlsx"
 
+## To assign clusters to a sample (in this case de novo, relapse, or healthy) clustering is first kept at 1-40. Later steps will enable assiging clusters to 
+## a sample or cell type
+cluster_merging1_filename <- "test_DNR_clusters.xlsx"
 cluster_merging1 <- read_excel(cluster_merging1_filename)
 data.frame(cluster_merging1)
 
@@ -335,15 +330,15 @@ mm <- match(code_clustering1, cluster_merging1$original_cluster)
 code_clustering1m <- cluster_merging1$new_cluster[mm]
 dr$Clusters <- factor(Clusters[tsne_inds])
 
-#loop for plots per cluster
+##l Loop for plots per cluster
 clusterdata<- read_excel("test_DNR_clusters.xlsx")
 names(clusterdata)
 
-#define list of clusters
+## Define list of clusters
 cluster_list<-clusterdata$original_cluster
 table(clusterdata$original_cluster)
 
-## Plot total clusters
+## Plot total clusters, will be the same as the tsne colored by clusters
 gg_tsne_cl1m <- ggplot(dr,  aes(x = tSNE1, y = tSNE2, color = Clusters)) +
   geom_point(size = 0.2) +
   theme_bw() +
@@ -359,7 +354,7 @@ dr_long <- melt(dr, id.vars = c("tSNE1", "tSNE2", "sample_id", "condition", "cel
 names(dr_long)[8]<-"Expr"
 
 
-## tSNE landscape overlayed with marker expression
+## Plot tSNE landscape overlayed with marker expression
 plot_dr_long <-
   dr_long %>% 
   group_by(variable) %>%
@@ -383,8 +378,8 @@ plot_markers_tsne_total<-arrangeGrob(grobs=plot_dr_long$plots)
 grid.arrange(plot_markers_tsne_total)
 
 
-## Now clusters per condition
-# create plotlist
+## Visualization of clusters per condition, can be handy to locate small clusters.
+## Create plotlist
 plot_list2<-list()
 for (i in cluster_list) {
   x<-subset(dr, dr$cell_clustering1==cluster_list[i])
@@ -401,7 +396,7 @@ for (i in cluster_list) {
 plot_list2[[i]]<-plot
 }
 
-#save in structured figure (now 8 plots on first page, numbers may be selected for each A4)
+## Plot in structured figure (now 8 plots on first page, numbers may be selected for each A4)
 clusters_per_sample_part1<-arrangeGrob(grobs=plot_list2[1:20], ncol = 4, nrow = 5)
 grid.arrange(clusters_per_sample_part1)
 
@@ -409,7 +404,7 @@ clusters_per_sample_part2<-arrangeGrob(grobs=plot_list2[21:40], ncol = 4, nrow =
 grid.arrange(clusters_per_sample_part2)
 
 
-## Plot clustersize over time
+## Plot clustersize over time. This step is now used to assign a cluster to a sample based on the cell count per sample.
 dr_clustersize <- dplyr::select(dr, condition, Clusters)
 
 clustersize_over_time <- 
@@ -429,14 +424,13 @@ plot_clustersize_over_time <- ggplot() +
   facet_wrap(~Clusters)
 plot_clustersize_over_time
 
-### Total clusters per sample
-## Facet per sample
+## PLot total clusters per sample
 tsne_per_sample_clusters<- gg_tsne_cl1m + facet_wrap(~ condition) + theme(strip.background = element_blank()) 
 tsne_per_sample_clusters
 
 
 
-## tSNE landscape overlayed with marker expression per condition
+## Plot tSNE landscape overlayed with marker expression per condition
 plot_dr_long_condition <-dr_long %>% group_by(variable) %>%
   do(
     plots = ggplot(data = .) + aes(x = tSNE1, y = tSNE2, color = Expr) +
@@ -453,7 +447,7 @@ plot_dr_long_condition <-dr_long %>% group_by(variable) %>%
       facet_wrap(~condition)
   )
 
-# show plots
+## Show plots
 plot_dr_long_condition$plots
 
 
@@ -461,8 +455,6 @@ plot_dr_long_condition$plots
 plot_markers_per_condition<-arrangeGrob(grobs=plot_dr_long_condition$plots)
 plots_markers_per_condition <- grid.arrange(plot_markers_per_condition)
 plots_markers_per_condition
-
-
 
 ## Facet per sample
 tsne_per_sample<- gg_tsne_cl1m + facet_wrap(~ sample_id) 
@@ -472,11 +464,10 @@ tsne_per_sample
 tsne_per_condition <- gg_tsne_cl1m + facet_wrap(~ condition) 
 tsne_per_condition
 
-
+### Assigning clusters to sample/condition
 
 ## Manual clustering per sample
 cluster_merging1_filename <- "test_DNR_samples.xlsx"
-
 cluster_merging1 <- read_excel(cluster_merging1_filename)
 data.frame(cluster_merging1)
 
@@ -490,6 +481,7 @@ code_clustering1m <- cluster_merging1$new_cluster[mm]
 dr$Clusters <- factor(Clusters[tsne_inds])
 dr$Clusters <- factor(dr$Clusters, levels = c("Diagnosis", "Relapse", "Healthy"))
 
+## Plot tsne landscape colored by sample
 gg_tsne_cl1m_samples <- ggplot(dr,  aes(x = tSNE1, y = tSNE2, color = Clusters)) +
   geom_point(size = 0.8) +
   theme_bw() +
@@ -510,7 +502,7 @@ tsne_per_sample_clusters_named<- gg_tsne_cl1m_samples + facet_wrap(~ condition) 
 tsne_per_sample_clusters_named
 
 
-### Heatmap original clusters labelled according to proposed merging
+## Heatmap original clusters labelled according to proposed merging
 heatmap_doublylabelled_clusters <- plot_clustering_heatmap_wrapper(expr = expr[, lineage_markers],
                                 expr01 = expr01[, lineage_markers], cell_clustering = cell_clustering1,
                                 color_clusters = color_clusters, cluster_merging = cluster_merging1)
@@ -521,25 +513,24 @@ heatmap_manuallylabelled_clusters <- plot_clustering_heatmap_wrapper(expr = expr
                                 color_clusters = color_clusters)
 
 
-### Principle component analysis between samples
+### Principle component analysis between samples, here the parameter contributing the most to the difference the condition can be identified
+### Clusters can be selected to zoom into for example the difference between de novo and relapse by excluding the healthy clusters
 dr_combined <- dr %>%
   group_by(dr$cell_clustering1) %>% 
   summarise_if(is.numeric, mean, na.rm = TRUE)
 dr_combined
 
 names(dr_combined)[1]<-"cluster"
-
-
 mm3 <- match(dr_combined$cluster, cluster_merging1$original_cluster)
 dr_combined$sample <- cluster_merging1$new_cluster[mm3]
 
+## Select which clusters and which parameters are to be included in the PCA by selecting the rows and columns to include from the dr_combined file
 data_pca_active <- dr_combined[1:40, 10:29]
-
 
 res.pca <- prcomp(data_pca_active, scale = TRUE)
 fviz_eig(res.pca)
 
-
+## Plot PCA variants
 pca_per_individual <- fviz_pca_ind(res.pca,
              col.ind = "cos2", # Color by the quality of representation
              gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
@@ -560,6 +551,7 @@ overlapped_pca <- fviz_pca_biplot(res.pca, repel = TRUE,
 )
 overlapped_pca
 
+## Plot PCA overlayed with group information,whereby the groups are formed by the samples the clusters have been assigned to previously. In this case de novo, relapse or healthy
 groups <- as.factor(dr_combined$sample[1:40])
 pca_per_sample <- fviz_pca_ind(res.pca,
              col.ind = groups, # color by groups
@@ -575,25 +567,23 @@ pca_per_sample
 pca_combined <- ggarrange(overlapped_pca, pca_per_sample, widths = c(2, 2.2))
 pca_combined
 
-
-
-### Calculate PC values 
+## Calculate PC values 
 var_coord_func <- function(loadings, comp.sdev){
   loadings*comp.sdev
 }
-# Compute Coordinates
+## Compute Coordinates
 #::::::::::::::::::::::::::::::::::::::::
 loadings <- res.pca$rotation
 sdev <- res.pca$sdev
 var.coord <- t(apply(loadings, 1, var_coord_func, sdev)) 
 head(var.coord[, 1:4])
 
-# Compute Cos2
+## Compute Cos2
 #::::::::::::::::::::::::::::::::::::::::
 var.cos2 <- var.coord^2
 head(var.cos2[, 1:4])
 
-# Compute contributions
+## Compute contributions
 #::::::::::::::::::::::::::::::::::::::::
 comp.cos2 <- apply(var.cos2, 2, sum)
 contrib <- function(var.cos2, comp.cos2){var.cos2*100/comp.cos2}
@@ -601,10 +591,12 @@ var.contrib <- t(apply(var.cos2,1, contrib, comp.cos2))
 head(var.contrib[, 1:4])
 
 var.contrib_long <- melt(var.contrib)
+
+## Select the rows that belong to PC1 and PC2. This differes depending on the amonut of parameters included in the analysis
 var.contrib_long_PC1 <- dplyr::slice(var.contrib_long, 1:20)
 var.contrib_long_PC2 <- dplyr::slice(var.contrib_long, 21:40)
 
-
+## Plot a ranking of the parameters contributing the msot to PC1
 plot_ranking_pc1 <- ggplot() +
   geom_bar(var.contrib_long_PC1, mapping = aes(x = reorder(Var1, -value), 
                                                y = value),
@@ -620,6 +612,7 @@ plot_ranking_pc1 <- ggplot() +
         legend.position = "none")
 plot_ranking_pc1
 
+## Plot a ranking of the parameters contributing the msot to PC2
 plot_ranking_pc2 <- ggplot() +
   geom_bar(var.contrib_long_PC2, mapping = aes(x = reorder(Var1, -value), 
                                                y = value),
@@ -636,29 +629,38 @@ plot_ranking_pc2 <- ggplot() +
 plot_ranking_pc2
 
 
-
-ggsave("NoBB_test - PCA AML - combined healthy.svg", pca_combined, 
+## Save the created plots
+ggsave("test - PCA AML - combined healthy.svg", pca_combined, 
        width = 10, height = 4)
-ggsave("NoBB_test - PCA AML - PC1 ranked healthy.svg", plot_ranking_pc1, 
+       
+ggsave("test - PCA AML - PC1 ranked healthy.svg", plot_ranking_pc1, 
        width = 10, height = 6)
-ggsave("NoBB_test - PCA AML - PC2 ranked healthy.svg", plot_ranking_pc2, 
+       
+ggsave("test - PCA AML - PC2 ranked healthy.svg", plot_ranking_pc2, 
        width = 10, height = 6)
-
-
-
-ggsave("RMs_test- Histograms expression.svg", histograms, width = 10, height = 6)
-ggsave("RMs_test - Heatmap total.svg", heatmap_clusters, width = 12, height = 8)
-ggsave("RMs_test - tSNE clusters total.pdf", tsne_clusters, width = 10, height = 8)
-ggsave("RMs_test - tSNE per sample.pdf", tsne_per_sample_clusters_named, 
+       
+ggsave("test- Histograms expression.svg", histograms, 
+       width = 10, height = 6)
+       
+ggsave("test - Heatmap total.svg", heatmap_clusters, 
+       width = 12, height = 8)
+       
+ggsave("test - tSNE clusters total.pdf", tsne_clusters, 
+       width = 10, height = 8)
+       
+ggsave("test - tSNE per sample.pdf", tsne_per_sample_clusters_named, 
        width = 10, height = 3, dpi = 300)
-ggsave("RMs_test - tSNE per sample - expression.png", plots_markers_per_condition, 
+       
+ggsave("test - tSNE per sample - expression.pdf", plots_markers_per_condition, 
        width = 30, height = 15, dpi = 300)
-
-ggsave("RMs_test - PCA AML - PC1 ranked healthy.svg", plot_ranking_pc1, 
+       
+ggsave("test - PCA AML - PC1 ranked healthy.svg", plot_ranking_pc1, 
        width = 10, height = 6)
-ggsave("RMs_test - PCA AML - PC2 ranked healthy.svg", plot_ranking_pc2, 
+       
+ggsave("test - PCA AML - PC2 ranked healthy.svg", plot_ranking_pc2, 
        width = 10, height = 6)
-ggsave("RMs_test - heatmap labelled clusters.svg", heatmap_manuallylabelled_clusters, 
+       
+ggsave("test - heatmap labelled clusters.svg", heatmap_manuallylabelled_clusters, 
        width = 15, height = 3)
 
 

@@ -1,0 +1,65 @@
+## Clean working directory and R history
+rm(list=ls())
+
+## Load packages
+library(tidyverse)
+library(reshape2)
+library(ggcyto)
+
+
+## Set working directory
+setwd("E:\\R data\\R data\\Marker panel")
+
+## Read in data for patient
+data_diagnosis <- read.csv("diagnosis - CD34+ exported.FCS3.csv")
+data_pbmcs <- read.csv("pbmcs - merged CD34+ exported.FCS3.csv")
+
+## Rename column names for following bakcbone markers
+names(data_diagnosis)[3]<-"CD45RA"
+names(data_diagnosis)[4]<-"CD38"
+names(data_diagnosis)[5]<-"CD45"
+names(data_diagnosis)[6]<-"CD34"
+
+names(data_pbmcs)[3]<-"CD45RA"
+names(data_pbmcs)[4]<-"CD38"
+names(data_pbmcs)[5]<-"CD45"
+names(data_pbmcs)[6]<-"CD34"
+
+
+## Rewrite datasets to long format in order to visualize + filter out Event, FSC and SSC FI values
+## Diagnosis dataset
+
+diagnosis_long <-melt(data_diagnosis)
+head(diagnosis_long)
+diagnosis_long<-dplyr::filter(diagnosis_long, variable!="Event.."&variable!="FSC.A"&variable!="SSC.A"&variable!="HDR.T")
+
+pbmcs_long<-melt(data_pbmcs)
+head(pbmcs_long)
+pbmcs_long<-dplyr::filter(pbmcs_long, variable!="Event.."&variable!="FSC.A"&variable!="SSC.A"&variable!="HDR.T")
+
+
+## Make plot with densities for all markers at diagnosis stratified by marker, and compare to healthy control
+plot<-ggplot()+geom_density(data=pbmcs_long, aes(x=value, y = ..scaled..), fill="green", alpha=0.5)+
+  geom_density(data=diagnosis_long, aes(x=value, y = ..scaled..), fill="red", alpha = 0.5)+
+  theme_bw()+
+  xlab("")+ 
+  ylab("")+
+  ggtitle("ID diagnosis - CD34+")+
+  scale_x_flowjo_biexp(maxValue = 262144, widthBasis = -500,
+                       pos = 4.5, neg = 0, equal.space = FALSE) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
+        axis.text = element_blank(),
+        strip.background.x = element_blank(),
+        strip.text.x = element_text(face ="bold"), 
+        axis.ticks = element_blank()) +
+      facet_wrap(.~variable, strip.position = c("bottom"))
+plot
+
+
+## Save plot with ID number 
+ggsave("plot_diagnosis - CD34+.svg", dpi=1000)
+
+
+
+
+
